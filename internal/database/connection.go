@@ -1,16 +1,17 @@
 package database
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
 
-	_ "github.com/lib/pq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-// DB holds the database connection
-var DB *sql.DB
+// DB holds the GORM database connection
+var DB *gorm.DB
 
 // Config holds database configuration
 type Config struct {
@@ -34,18 +35,26 @@ func NewConfig() *Config {
 	}
 }
 
-// Connect establishes a connection to the database
+// Connect establishes a connection to the database using GORM
 func Connect(config *Config) error {
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		config.Host, config.Port, config.User, config.Password, config.DBName, config.SSLMode)
 
 	var err error
-	DB, err = sql.Open("postgres", dsn)
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	if err = DB.Ping(); err != nil {
+	// Get the underlying sql.DB to ping
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+
+	if err = sqlDB.Ping(); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -56,7 +65,11 @@ func Connect(config *Config) error {
 // Close closes the database connection
 func Close() error {
 	if DB != nil {
-		return DB.Close()
+		sqlDB, err := DB.DB()
+		if err != nil {
+			return fmt.Errorf("failed to get underlying sql.DB: %w", err)
+		}
+		return sqlDB.Close()
 	}
 	return nil
 }

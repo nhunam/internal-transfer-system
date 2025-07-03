@@ -1,35 +1,32 @@
 package repository
 
 import (
-	"database/sql"
 	"fmt"
-	"time"
 
 	"internal-transfer-system/internal/model"
 
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 // AccountRepository handles database operations for accounts
 type AccountRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 // NewAccountRepository creates a new account repository
-func NewAccountRepository(db *sql.DB) *AccountRepository {
+func NewAccountRepository(db *gorm.DB) *AccountRepository {
 	return &AccountRepository{db: db}
 }
 
 // Create creates a new account in the database
 func (r *AccountRepository) Create(accountID int64, initialBalance decimal.Decimal) error {
-	query := `
-		INSERT INTO accounts (account_id, balance, created_at, updated_at)
-		VALUES ($1, $2, $3, $4)
-	`
+	account := &model.Account{
+		ID:      accountID,
+		Balance: initialBalance,
+	}
 
-	now := time.Now()
-	_, err := r.db.Exec(query, accountID, initialBalance, now, now)
-	if err != nil {
+	if err := r.db.Create(account).Error; err != nil {
 		return fmt.Errorf("failed to create account: %w", err)
 	}
 
@@ -38,22 +35,10 @@ func (r *AccountRepository) Create(accountID int64, initialBalance decimal.Decim
 
 // GetByID retrieves an account by its ID
 func (r *AccountRepository) GetByID(accountID int64) (*model.Account, error) {
-	query := `
-		SELECT account_id, balance, created_at, updated_at
-		FROM accounts
-		WHERE account_id = $1
-	`
-
 	var account model.Account
-	err := r.db.QueryRow(query, accountID).Scan(
-		&account.ID,
-		&account.Balance,
-		&account.CreatedAt,
-		&account.UpdatedAt,
-	)
 
-	if err != nil {
-		if err == sql.ErrNoRows {
+	if err := r.db.Where("account_id = ?", accountID).First(&account).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("account not found")
 		}
 		return nil, fmt.Errorf("failed to get account: %w", err)
@@ -64,23 +49,13 @@ func (r *AccountRepository) GetByID(accountID int64) (*model.Account, error) {
 
 // UpdateBalance updates the account balance
 func (r *AccountRepository) UpdateBalance(accountID int64, newBalance decimal.Decimal) error {
-	query := `
-		UPDATE accounts
-		SET balance = $1, updated_at = $2
-		WHERE account_id = $3
-	`
+	result := r.db.Model(&model.Account{}).Where("account_id = ?", accountID).Update("balance", newBalance)
 
-	result, err := r.db.Exec(query, newBalance, time.Now(), accountID)
-	if err != nil {
-		return fmt.Errorf("failed to update account balance: %w", err)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update account balance: %w", result.Error)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("account not found")
 	}
 
@@ -89,16 +64,10 @@ func (r *AccountRepository) UpdateBalance(accountID int64, newBalance decimal.De
 
 // Exists checks if an account exists
 func (r *AccountRepository) Exists(accountID int64) (bool, error) {
-	query := `SELECT 1 FROM accounts WHERE account_id = $1`
-
-	var exists int
-	err := r.db.QueryRow(query, accountID).Scan(&exists)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
+	var count int64
+	if err := r.db.Model(&model.Account{}).Where("account_id = ?", accountID).Count(&count).Error; err != nil {
 		return false, fmt.Errorf("failed to check account existence: %w", err)
 	}
 
-	return true, nil
+	return count > 0, nil
 }

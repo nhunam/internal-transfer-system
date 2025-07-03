@@ -1,24 +1,24 @@
 package service
 
 import (
-	"database/sql"
 	"fmt"
 
 	"internal-transfer-system/internal/model"
 	"internal-transfer-system/internal/repository"
 
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 // TransactionService handles business logic for transactions
 type TransactionService struct {
-	db              *sql.DB
+	db              *gorm.DB
 	transactionRepo *repository.TransactionRepository
 	accountService  *AccountService
 }
 
 // NewTransactionService creates a new transaction service
-func NewTransactionService(db *sql.DB, transactionRepo *repository.TransactionRepository, accountService *AccountService) *TransactionService {
+func NewTransactionService(db *gorm.DB, transactionRepo *repository.TransactionRepository, accountService *AccountService) *TransactionService {
 	return &TransactionService{
 		db:              db,
 		transactionRepo: transactionRepo,
@@ -80,86 +80,70 @@ func (s *TransactionService) validateTransactionRequest(request *model.CreateTra
 
 // processTransaction processes the transaction with proper data integrity
 func (s *TransactionService) processTransaction(sourceAccountID, destinationAccountID int64, amount decimal.Decimal) error {
-	// Start database transaction
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to start database transaction: %w", err)
-	}
-	defer tx.Rollback()
+	// Use GORM transaction
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Lock accounts for update to prevent concurrent modifications
+		sourceBalance, err := s.getAccountBalanceForUpdate(tx, sourceAccountID)
+		if err != nil {
+			return fmt.Errorf("failed to get source account balance: %w", err)
+		}
 
-	// Lock accounts for update to prevent concurrent modifications
-	sourceBalance, err := s.getAccountBalanceForUpdate(tx, sourceAccountID)
-	if err != nil {
-		return fmt.Errorf("failed to get source account balance: %w", err)
-	}
+		destinationBalance, err := s.getAccountBalanceForUpdate(tx, destinationAccountID)
+		if err != nil {
+			return fmt.Errorf("failed to get destination account balance: %w", err)
+		}
 
-	destinationBalance, err := s.getAccountBalanceForUpdate(tx, destinationAccountID)
-	if err != nil {
-		return fmt.Errorf("failed to get destination account balance: %w", err)
-	}
+		// Check if source account has sufficient balance
+		if sourceBalance.LessThan(amount) {
+			return fmt.Errorf("insufficient balance in source account")
+		}
 
-	// Check if source account has sufficient balance
-	if sourceBalance.LessThan(amount) {
-		return fmt.Errorf("insufficient balance in source account")
-	}
+		// Calculate new balances
+		newSourceBalance := sourceBalance.Sub(amount)
+		newDestinationBalance := destinationBalance.Add(amount)
 
-	// Calculate new balances
-	newSourceBalance := sourceBalance.Sub(amount)
-	newDestinationBalance := destinationBalance.Add(amount)
+		// Update account balances
+		if err := s.updateAccountBalanceInTx(tx, sourceAccountID, newSourceBalance); err != nil {
+			return fmt.Errorf("failed to update source account balance: %w", err)
+		}
 
-	// Update account balances
-	if err := s.updateAccountBalanceInTx(tx, sourceAccountID, newSourceBalance); err != nil {
-		return fmt.Errorf("failed to update source account balance: %w", err)
-	}
+		if err := s.updateAccountBalanceInTx(tx, destinationAccountID, newDestinationBalance); err != nil {
+			return fmt.Errorf("failed to update destination account balance: %w", err)
+		}
 
-	if err := s.updateAccountBalanceInTx(tx, destinationAccountID, newDestinationBalance); err != nil {
-		return fmt.Errorf("failed to update destination account balance: %w", err)
-	}
+		// Create transaction record
+		if err := s.createTransactionInTx(tx, sourceAccountID, destinationAccountID, amount, model.TransactionStatusCompleted); err != nil {
+			return fmt.Errorf("failed to create transaction record: %w", err)
+		}
 
-	// Create transaction record
-	if err := s.createTransactionInTx(tx, sourceAccountID, destinationAccountID, amount, model.TransactionStatusCompleted); err != nil {
-		return fmt.Errorf("failed to create transaction record: %w", err)
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // getAccountBalanceForUpdate gets account balance with row lock
-func (s *TransactionService) getAccountBalanceForUpdate(tx *sql.Tx, accountID int64) (decimal.Decimal, error) {
-	query := `SELECT balance FROM accounts WHERE account_id = $1 FOR UPDATE`
+func (s *TransactionService) getAccountBalanceForUpdate(tx *gorm.DB, accountID int64) (decimal.Decimal, error) {
+	var account model.Account
 
-	var balance decimal.Decimal
-	err := tx.QueryRow(query, accountID).Scan(&balance)
+	err := tx.Where("account_id = ?", accountID).Set("gorm:query_option", "FOR UPDATE").First(&account).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == gorm.ErrRecordNotFound {
 			return decimal.Zero, fmt.Errorf("account not found")
 		}
 		return decimal.Zero, fmt.Errorf("failed to get account balance: %w", err)
 	}
 
-	return balance, nil
+	return account.Balance, nil
 }
 
 // updateAccountBalanceInTx updates account balance within a transaction
-func (s *TransactionService) updateAccountBalanceInTx(tx *sql.Tx, accountID int64, newBalance decimal.Decimal) error {
-	query := `UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE account_id = $2`
+func (s *TransactionService) updateAccountBalanceInTx(tx *gorm.DB, accountID int64, newBalance decimal.Decimal) error {
+	result := tx.Model(&model.Account{}).Where("account_id = ?", accountID).Update("balance", newBalance)
 
-	result, err := tx.Exec(query, newBalance, accountID)
-	if err != nil {
-		return fmt.Errorf("failed to update account balance: %w", err)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update account balance: %w", result.Error)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("account not found")
 	}
 
@@ -167,14 +151,15 @@ func (s *TransactionService) updateAccountBalanceInTx(tx *sql.Tx, accountID int6
 }
 
 // createTransactionInTx creates a transaction record within a transaction
-func (s *TransactionService) createTransactionInTx(tx *sql.Tx, sourceAccountID, destinationAccountID int64, amount decimal.Decimal, status string) error {
-	query := `
-		INSERT INTO transactions (source_account_id, destination_account_id, amount, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`
+func (s *TransactionService) createTransactionInTx(tx *gorm.DB, sourceAccountID, destinationAccountID int64, amount decimal.Decimal, status string) error {
+	transaction := &model.Transaction{
+		SourceAccountID:      sourceAccountID,
+		DestinationAccountID: destinationAccountID,
+		Amount:               amount,
+		Status:               status,
+	}
 
-	_, err := tx.Exec(query, sourceAccountID, destinationAccountID, amount, status)
-	if err != nil {
+	if err := tx.Create(transaction).Error; err != nil {
 		return fmt.Errorf("failed to create transaction: %w", err)
 	}
 

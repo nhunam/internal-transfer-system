@@ -1,17 +1,16 @@
 package router
 
 import (
-	"database/sql"
-
 	"internal-transfer-system/internal/handler"
 	"internal-transfer-system/internal/repository"
 	"internal-transfer-system/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // SetupRouter sets up the HTTP routes and returns a Gin router
-func SetupRouter(db *sql.DB) *gin.Engine {
+func SetupRouter(db *gorm.DB) *gin.Engine {
 	// Set Gin to release mode for production
 	gin.SetMode(gin.ReleaseMode)
 
