@@ -8,6 +8,7 @@ help:
 	@echo "  setup       - Setup the project (start DB, install deps)"
 	@echo "  run         - Run the application"
 	@echo "  test        - Run API tests"
+	@echo "  test-unit   - Run unit tests"
 	@echo "  deps        - Install Go dependencies"
 	@echo "  fmt         - Format Go code"
 	@echo "  lint        - Run linting (requires golangci-lint)"
@@ -48,6 +49,11 @@ test:
 	@if [ ! -f test_api.sh ]; then echo "test_api.sh not found!"; exit 1; fi
 	@chmod +x test_api.sh
 	./test_api.sh
+
+# Run unit tests
+test-unit:
+	@echo "Running unit tests..."
+	go test -v ./internal/repository/... ./internal/service/...
 
 # Format Go code
 fmt:
