@@ -239,31 +239,38 @@ The application follows a clean architecture pattern:
 ```
 internal-transfer-system/
 ├── cmd/
-│   └── main.go                 # Application entry point
+│   └── main.go                          # Application entry point
 ├── internal/
 │   ├── database/
-│   │   ├── connection.go       # Database connection management
-│   │   └── schema.go          # Database schema and migrations
+│   │   ├── connection.go                # Database connection management
+│   │   └── schema.go                   # Database schema and migrations
 │   ├── model/
-│   │   ├── account.go         # Account model and DTOs
-│   │   └── transaction.go     # Transaction model and DTOs
+│   │   ├── account.go                  # Account model and DTOs
+│   │   └── transaction.go              # Transaction model and DTOs
 │   ├── repository/
-│   │   ├── account_repository.go    # Account data access
-│   │   └── transaction_repository.go # Transaction data access
+│   │   ├── account_repository.go       # Account data access
+│   │   ├── account_repository_test.go  # Account repository unit tests
+│   │   ├── transaction_repository.go   # Transaction data access
+│   │   └── transaction_repository_test.go # Transaction repository unit tests
 │   ├── service/
-│   │   ├── account_service.go      # Account business logic
-│   │   └── transaction_service.go  # Transaction business logic
+│   │   ├── account_service.go          # Account business logic
+│   │   ├── account_service_test.go     # Account service unit tests
+│   │   ├── test_helper.go              # Shared test utilities
+│   │   ├── transaction_service.go      # Transaction business logic
+│   │   └── transaction_service_test.go # Transaction service unit tests
 │   ├── handler/
-│   │   ├── account_handler.go      # Account HTTP handlers
-│   │   └── transaction_handler.go  # Transaction HTTP handlers
+│   │   ├── account_handler.go          # Account HTTP handlers
+│   │   └── transaction_handler.go      # Transaction HTTP handlers
 │   ├── router/
-│   │   └── router.go              # HTTP router setup
+│   │   └── router.go                   # HTTP router setup
 │   └── utils/
-│       └── string_utils.go        # Utility functions
-├── docker-compose.yml         # PostgreSQL setup
-├── go.mod                     # Go module dependencies
-├── test_api.sh               # API test script
-└── README.md                 # This file
+│       └── string_utils.go             # Utility functions
+├── docker-compose.yml                  # PostgreSQL setup
+├── go.mod                              # Go module dependencies
+├── go.sum                              # Go module checksums
+├── Makefile                            # Development workflow automation
+├── test_api.sh                         # API integration test script
+└── README.md                           # This file
 ```
 
 ## Data Integrity & Consistency
